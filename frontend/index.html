@@ -120,7 +120,8 @@
     </div>
 
     <script>
-        const API = 'http://localhost:8000';
+        // 현재 호스트(Render 또는 Localhost)를 기준으로 상대 경로 API 요청을 보냅니다.
+        const API = '';
         let docs = [];
         let selectedDocIds = new Set();
         let chatHistory = JSON.parse(localStorage.getItem('chatHistory') || '[]');
