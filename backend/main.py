@@ -1,10 +1,10 @@
 import uuid
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 import json, os
 
 from rag import index_document, search_similar, delete_document, generate_answer_stream, generate_graph, extract_pages_from_docx
@@ -25,20 +25,36 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # 문서 메타데이터 파일
 DOCS_FILE = "documents.json"
 
-def load_docs():
+def load_docs(session_id: str = "default"):
     if os.path.exists(DOCS_FILE):
         with open(DOCS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            try:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data.get(session_id, [])
+                else:
+                    return [] # old format, ignore
+            except:
+                return []
     return []
 
-def save_docs(docs):
+def save_docs(session_id: str, docs: list):
+    data = {}
+    if os.path.exists(DOCS_FILE):
+        with open(DOCS_FILE, "r", encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+                if not isinstance(data, dict): data = {}
+            except:
+                data = {}
+    data[session_id] = docs
     with open(DOCS_FILE, "w", encoding="utf-8") as f:
-        json.dump(docs, f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 # ── 문서 업로드 ─────────────────────────────────────────────────────────────
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...), x_session_id: str = Header("default")):
     if not (file.filename.lower().endswith(".pdf") or file.filename.lower().endswith(".docx")):
         raise HTTPException(status_code=400, detail="PDF 또는 DOCX 파일만 업로드 가능합니다.")
     
@@ -65,7 +81,7 @@ async def upload_document(file: UploadFile = File(...)):
                     f.write(f"--- [페이지 {p['page_number']}] ---\n{p['text']}\n\n")
         
         # 2. 문서 인덱싱 처리
-        chunk_count, insights = index_document(doc_id, file.filename, file_bytes, ext)
+        chunk_count, insights = index_document(doc_id, file.filename, file_bytes, ext, x_session_id)
         
         doc_info = {
             "id": doc_id,
@@ -76,13 +92,9 @@ async def upload_document(file: UploadFile = File(...)):
             "tags": insights.get("tags", [])
         }
         
-        docs = []
-        if os.path.exists("documents.json"):
-            with open("documents.json", "r", encoding="utf-8") as f:
-                docs = json.load(f)
+        docs = load_docs(x_session_id)
         docs.append(doc_info)
-        with open("documents.json", "w", encoding="utf-8") as f:
-            json.dump(docs, f, ensure_ascii=False)
+        save_docs(x_session_id, docs)
             
         return {"message": "업로드 성공", "doc": doc_info}
     except Exception as e:
@@ -92,16 +104,15 @@ async def upload_document(file: UploadFile = File(...)):
 
 # ── 문서 목록 조회 ────────────────────────────────────────────────────────────
 @app.get("/documents")
-def list_documents():
-    return load_docs()
-
+def list_documents(x_session_id: str = Header("default")):
+    return load_docs(x_session_id)
 
 # ── 문서 삭제 ─────────────────────────────────────────────────────────────────
 @app.delete("/documents/{doc_id}")
-def remove_document(doc_id: str):
+def remove_document(doc_id: str, x_session_id: str = Header("default")):
     delete_document(doc_id)
-    docs = [d for d in load_docs() if d["id"] != doc_id]
-    save_docs(docs)
+    docs = [d for d in load_docs(x_session_id) if d["id"] != doc_id]
+    save_docs(x_session_id, docs)
     return {"status": "deleted"}
 
 
@@ -112,12 +123,12 @@ class ChatRequest(BaseModel):
     is_local: bool = False
 
 @app.post("/chat")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, x_session_id: str = Header("default")):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="질문을 입력해주세요.")
     
     try:
-        chunks = search_similar(req.question, doc_ids=req.doc_ids)
+        chunks = search_similar(req.question, doc_ids=req.doc_ids, session_id=x_session_id)
         
         def event_stream():
             for text_chunk in generate_answer_stream(req.question, chunks, is_local=req.is_local):
@@ -129,7 +140,7 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/graph/{doc_id}")
-async def get_graph(doc_id: str):
+async def get_graph(doc_id: str, x_session_id: str = Header("default")):
     try:
         graph_data = generate_graph(doc_id)
         return graph_data

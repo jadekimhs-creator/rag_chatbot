@@ -120,6 +120,12 @@
     </div>
 
     <script>
+        // Session ID 발급 (브라우저 열 때마다 고유한 아이디 부여, 창을 닫으면 리셋)
+        if (!sessionStorage.getItem('sessionId')) {
+            sessionStorage.setItem('sessionId', 'sess_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36));
+        }
+        const sessionId = sessionStorage.getItem('sessionId');
+
         // 현재 호스트(Render 또는 Localhost)를 기준으로 상대 경로 API 요청을 보냅니다.
         const API = '';
         let docs = [];
@@ -158,11 +164,17 @@
 
         // ── Load Documents ────────────────────────────────────────────────────
         async function loadDocuments() {
-            const res = await fetch(`${API}/documents`);
-            docs = await res.json();
-            renderDocList();
-            updateChatHeader();
-            document.getElementById('doc-count').textContent = docs.length;
+            try {
+                const res = await fetch(`${API}/documents`, {
+                    headers: { 'X-Session-ID': sessionId }
+                });
+                docs = await res.json();
+                renderDocList();
+                updateChatHeader();
+                document.getElementById('doc-count').textContent = docs.length;
+            } catch (e) {
+                console.error("Failed to load documents", e);
+            }
         }
 
         function toggleDoc(id) {
@@ -215,7 +227,9 @@
             container.innerHTML = '<div style="display:flex; height:100%; align-items:center; justify-content:center; color:#888;">지식 그래프를 추출 중입니다... ⏳ (최대 20초 소요)</div>';
             
             try {
-                const res = await fetch(`${API}/graph/${docId}`);
+                const res = await fetch(`${API}/graph/${docId}`, {
+                    headers: { 'X-Session-ID': sessionId }
+                });
                 const data = await res.json();
                 
                 if(!data.nodes || data.nodes.length === 0) {
@@ -254,7 +268,13 @@
             for (let i = 0; i < validFiles.length; i++) {
                 const form = new FormData();
                 form.append('file', validFiles[i]);
-                try { await fetch(`${API}/upload`, { method: 'POST', body: form }); } catch(e) {}
+                try { 
+                    await fetch(`${API}/upload`, { 
+                        method: 'POST', 
+                        body: form,
+                        headers: { 'X-Session-ID': sessionId }
+                    }); 
+                } catch(e) {}
             }
             await loadDocuments();
             document.getElementById('upload-progress').style.display = 'none';
@@ -262,14 +282,22 @@
 
         async function deleteDoc(id) {
             if (!confirm('이 문서를 삭제할까요?')) return;
-            await fetch(`${API}/documents/${id}`, { method: 'DELETE' });
+            await fetch(`${API}/documents/${id}`, { 
+                method: 'DELETE',
+                headers: { 'X-Session-ID': sessionId }
+            });
             selectedDocIds.delete(id);
             await loadDocuments();
         }
 
         document.getElementById('clear-btn').addEventListener('click', async () => {
             if (!confirm('모든 문서를 삭제할까요?')) return;
-            for (const d of docs) await fetch(`${API}/documents/${d.id}`, { method: 'DELETE' });
+            for (const d of docs) {
+                const res = await fetch(`${API}/documents/${d.id}`, { 
+                    method: 'DELETE',
+                    headers: { 'X-Session-ID': sessionId }
+                });
+            }
             selectedDocIds.clear();
             chatHistory = []; saveChatHistory(); document.getElementById('messages').innerHTML = '';
             closeViewer(); await loadDocuments();
@@ -346,7 +374,10 @@
                 const isLocal = document.getElementById('local-mode-toggle').checked;
                 const res = await fetch(`${API}/chat`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-Session-ID': sessionId 
+                    },
                     body: JSON.stringify({ question: q, doc_ids: Array.from(selectedDocIds), is_local: isLocal })
                 });
 

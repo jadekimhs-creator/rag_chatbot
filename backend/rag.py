@@ -45,16 +45,19 @@ class VectorStore:
         self.metadatas.extend(metadatas)
         self._save()
 
-    def query(self, query_embedding, n_results=5, doc_ids=None):
+    def query(self, query_embedding, n_results=5, doc_ids=None, session_id="default"):
         if not self.embeddings:
             return []
         q = np.array(query_embedding)
         embs = np.array(self.embeddings)
         sims = np.dot(embs, q) / (np.linalg.norm(embs, axis=1) * np.linalg.norm(q) + 1e-10)
-        if doc_ids:
-            for i, m in enumerate(self.metadatas):
-                if m.get("doc_id") not in doc_ids:
-                    sims[i] = -1
+        
+        for i, m in enumerate(self.metadatas):
+            if m.get("session_id", "default") != session_id:
+                sims[i] = -1
+            elif doc_ids and m.get("doc_id") not in doc_ids:
+                sims[i] = -1
+                
         top = np.argsort(sims)[::-1][:n_results]
         
         # 반환할 때 메타데이터(페이지 번호 등)도 함께 반환
@@ -161,7 +164,7 @@ def generate_insights(full_text: str) -> dict:
 
 
 # ── 문서 인덱싱 ──────────────────────────────────────────────────────────────
-def index_document(doc_id: str, filename: str, file_bytes: bytes, file_ext: str = ".pdf") -> tuple[int, dict]:
+def index_document(doc_id: str, filename: str, file_bytes: bytes, file_ext: str = ".pdf", session_id: str = "default") -> tuple[int, dict]:
     if file_ext == ".docx":
         pages = extract_pages_from_docx(file_bytes)
     else:
@@ -180,7 +183,8 @@ def index_document(doc_id: str, filename: str, file_bytes: bytes, file_ext: str 
                 "doc_id": doc_id, 
                 "filename": filename, 
                 "page_number": page["page_number"],
-                "chunk_index": i
+                "chunk_index": i,
+                "session_id": session_id
             })
             
     store.add(docs, embeddings, metadatas)
@@ -191,9 +195,9 @@ def index_document(doc_id: str, filename: str, file_bytes: bytes, file_ext: str 
 
 
 # ── 유사 청크 검색 (다중 문서 지원) ────────────────────────────────────────────
-def search_similar(query: str, doc_ids: list[str] = None, n_results: int = 5) -> list[dict]:
+def search_similar(query: str, doc_ids: list[str] = None, n_results: int = 5, session_id: str = "default") -> list[dict]:
     q_emb = get_query_embedding(query)
-    return store.query(q_emb, n_results=n_results, doc_ids=doc_ids)
+    return store.query(q_emb, n_results=n_results, doc_ids=doc_ids, session_id=session_id)
 
 
 # ── 마인드맵 (지식 그래프) 생성 ─────────────────────────────────────────────
