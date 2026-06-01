@@ -130,9 +130,9 @@
         const API = '';
         let docs = [];
         let selectedDocIds = new Set();
-        let chatHistory = JSON.parse(localStorage.getItem('chatHistory') || '[]');
+        let chatHistory = JSON.parse(sessionStorage.getItem('chatHistory') || '[]');
 
-        function saveChatHistory() { localStorage.setItem('chatHistory', JSON.stringify(chatHistory)); }
+        function saveChatHistory() { sessionStorage.setItem('chatHistory', JSON.stringify(chatHistory)); }
 
         // ── Theme ─────────────────────────────────────────────────────────────
         const themeBtn = document.getElementById('theme-btn');
