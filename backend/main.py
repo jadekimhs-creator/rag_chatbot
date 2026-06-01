@@ -21,13 +21,7 @@ app.add_middleware(
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-app.mount("/static", StaticFiles(directory="../frontend"), name="static")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-
-@app.get("/")
-async def root():
-    return FileResponse("../frontend/index.html")
-
 # 문서 메타데이터 파일
 DOCS_FILE = "documents.json"
 
