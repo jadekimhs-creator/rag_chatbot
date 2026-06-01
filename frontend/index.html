@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Chatbot | 궁극의 어시스턴트</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- vis-network for Knowledge Graph -->
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">◈</span>
+                    <span>DocMind</span>
+                </div>
+                <div class="header-actions">
+                    <button class="theme-btn" id="theme-btn" title="테마 변경">◐</button>
+                    <button class="export-btn" id="export-btn" title="대화 내보내기">📥</button>
+                </div>
+            </div>
+
+            <div class="mode-switch-bar">
+                <span class="toggle-label" id="mode-label">☁️ 클라우드 모드</span>
+                <label class="switch" title="로컬 프라이버시 모드 (Ollama)">
+                    <input type="checkbox" id="local-mode-toggle">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+
+            <div class="upload-zone" id="upload-zone">
+                <input type="file" id="file-input" accept=".pdf,.docx" hidden multiple>
+                <div class="upload-icon">↑</div>
+                <p class="upload-label">PDF 또는 Word 드래그 & 드롭</p>
+                <p class="upload-sub">또는 클릭해서 선택</p>
+            </div>
+
+            <div class="upload-progress" id="upload-progress" style="display:none;">
+                <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+                <p class="progress-text" id="progress-text">업로드 중...</p>
+            </div>
+
+            <div class="doc-list-header">
+                <span>업로드된 문서</span>
+                <span class="doc-count" id="doc-count">0</span>
+            </div>
+
+            <div class="doc-list" id="doc-list">
+                <p class="empty-docs">업로드된 문서가 없습니다.</p>
+            </div>
+
+            <div class="sidebar-footer">
+                <button class="clear-btn" id="clear-btn">전체 초기화</button>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <div class="workspace" id="workspace">
+            
+            <!-- Left Pane: PDF Viewer -->
+            <div class="pdf-pane" id="pdf-pane" style="display: none;">
+                <div class="pane-header">
+                    <span class="pane-title">📄 <span id="viewer-title">문서 뷰어</span></span>
+                    <button class="close-viewer-btn" onclick="closeViewer()">✕</button>
+                </div>
+                <iframe id="pdf-iframe" src="" frameborder="0"></iframe>
+            </div>
+
+            <!-- Right Pane: Chat Area -->
+            <main class="chat-area" id="chat-area">
+                <div class="chat-header">
+                    <div class="chat-title">
+                        <h1 id="chat-doc-name">모든 문서 대상</h1>
+                        <span class="chat-subtitle" id="chat-subtitle">체크된 문서를 기반으로 질문에 답변합니다</span>
+                    </div>
+                </div>
+
+                <div class="messages" id="messages">
+                    <div class="welcome-msg">
+                        <div class="welcome-icon">◈</div>
+                        <h2>궁극의 지식 어시스턴트</h2>
+                        <p>다중 문서 비교, 마인드맵 생성, 대화 내보내기 기능이 추가되었습니다.</p>
+                    </div>
+                </div>
+
+                <!-- Quick Prompts Area -->
+                <div class="quick-prompts-wrap">
+                    <div class="quick-prompts">
+                        <button class="qp-btn" onclick="setQuestion('핵심만 3줄로 요약해줘')">💡 3줄 요약</button>
+                        <button class="qp-btn" onclick="setQuestion('선택된 문서들 간의 가장 큰 차이점은 무엇인가요?')">⚖️ 문서 비교</button>
+                        <button class="qp-btn" onclick="setQuestion('초등학생도 이해할 수 있게 아주 쉽게 설명해줘')">👶 쉽게 설명</button>
+                        <button class="qp-btn" onclick="setQuestion('이 문서에서 논리적 모순이나 문제점이 있나요?')">🔍 모순 찾기</button>
+                    </div>
+                </div>
+
+                <div class="input-area">
+                    <div class="input-wrap">
+                        <button class="mic-btn" id="mic-btn" title="음성으로 질문하기">🎤</button>
+                        <textarea id="question-input" placeholder="체크된 문서에 대해 질문하세요..." rows="1"></textarea>
+                        <button class="send-btn" id="send-btn"><span>↑</span></button>
+                    </div>
+                    <p class="input-hint">Enter로 전송 · [페이지 번호] 클릭 시 원본 보기 · [지식 맵]으로 마인드맵 렌더링</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Graph Modal -->
+    <div id="graph-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeGraph()">&times;</span>
+            <h2>🧠 지식 마인드맵 <span id="graph-title"></span></h2>
+            <div id="graph-network"></div>
+        </div>
+    </div>
+
+    <script>
+        const API = 'http://localhost:8000';
+        let docs = [];
+        let selectedDocIds = new Set();
+        let chatHistory = JSON.parse(localStorage.getItem('chatHistory') || '[]');
+
+        function saveChatHistory() { localStorage.setItem('chatHistory', JSON.stringify(chatHistory)); }
+
+        // ── Theme ─────────────────────────────────────────────────────────────
+        const themeBtn = document.getElementById('theme-btn');
+        const applyTheme = (t) => {
+            document.documentElement.setAttribute('data-theme', t);
+            localStorage.setItem('theme', t);
+            themeBtn.textContent = t === 'dark' ? '☀' : '◐';
+        };
+        applyTheme(localStorage.getItem('theme') || 'light');
+        themeBtn.addEventListener('click', () => {
+            applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+        });
+
+        // ── Export ────────────────────────────────────────────────────────────
+        document.getElementById('export-btn').addEventListener('click', () => {
+            if(chatHistory.length === 0) return alert("내보낼 대화 내역이 없습니다.");
+            let mdContent = "# RAG 챗봇 분석 리포트\n\n";
+            chatHistory.forEach(msg => {
+                const role = msg.role === 'user' ? '👤 사용자' : '◈ AI 어시스턴트';
+                mdContent += `### ${role}\n${msg.content}\n\n---\n\n`;
+            });
+            const blob = new Blob([mdContent], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `분석리포트_${new Date().toISOString().slice(0,10)}.md`;
+            a.click();
+        });
+
+        // ── Load Documents ────────────────────────────────────────────────────
+        async function loadDocuments() {
+            const res = await fetch(`${API}/documents`);
+            docs = await res.json();
+            renderDocList();
+            updateChatHeader();
+            document.getElementById('doc-count').textContent = docs.length;
+        }
+
+        function toggleDoc(id) {
+            if(selectedDocIds.has(id)) selectedDocIds.delete(id);
+            else selectedDocIds.add(id);
+            updateChatHeader();
+        }
+
+        function updateChatHeader() {
+            const nameEl = document.getElementById('chat-doc-name');
+            if (selectedDocIds.size === 0) nameEl.textContent = '모든 문서 대상';
+            else if (selectedDocIds.size === 1) {
+                const doc = docs.find(d => d.id === Array.from(selectedDocIds)[0]);
+                nameEl.textContent = doc ? doc.filename : '1개 문서';
+            } else {
+                nameEl.textContent = `${selectedDocIds.size}개 문서 대상 (비교 가능)`;
+            }
+        }
+
+        function renderDocList() {
+            const list = document.getElementById('doc-list');
+            if (docs.length === 0) { list.innerHTML = '<p class="empty-docs">업로드된 문서가 없습니다.</p>'; return; }
+            
+            list.innerHTML = docs.map(d => {
+                const icon = d.filename.toLowerCase().endsWith('.docx') ? '📝' : '📄';
+                return `
+                <div class="doc-item">
+                    <div class="doc-item-header">
+                        <input type="checkbox" class="doc-check" ${selectedDocIds.has(d.id) ? 'checked' : ''} onchange="toggleDoc('${d.id}')">
+                        <div class="doc-info" style="cursor:pointer;" onclick="openViewer(1, '${d.id}')">
+                            <span class="doc-name">${icon} ${d.filename}</span>
+                        </div>
+                        <button class="graph-btn" title="지식 마인드맵 보기" onclick="openGraph('${d.id}', '${d.filename}')">🕸️</button>
+                        <button class="doc-del" onclick="event.stopPropagation(); deleteDoc('${d.id}')">✕</button>
+                    </div>
+                    <div class="doc-insights">
+                        ${d.tags && d.tags.length > 0 ? `<div class="doc-tags">${d.tags.map(t => `<span>${t}</span>`).join('')}</div>` : ''}
+                        ${d.summary ? `<p class="doc-summary">${d.summary}</p>` : ''}
+                    </div>
+                </div>
+            `}).join('');
+        }
+
+        // ── Graph Viewer ──────────────────────────────────────────────────────
+        async function openGraph(docId, filename) {
+            document.getElementById('graph-title').textContent = `- ${filename}`;
+            document.getElementById('graph-modal').style.display = 'flex';
+            
+            const container = document.getElementById('graph-network');
+            container.innerHTML = '<div style="display:flex; height:100%; align-items:center; justify-content:center; color:#888;">지식 그래프를 추출 중입니다... ⏳ (최대 20초 소요)</div>';
+            
+            try {
+                const res = await fetch(`${API}/graph/${docId}`);
+                const data = await res.json();
+                
+                if(!data.nodes || data.nodes.length === 0) {
+                    container.innerHTML = '<div style="display:flex; height:100%; align-items:center; justify-content:center; color:#888;">그래프를 추출하지 못했습니다.</div>';
+                    return;
+                }
+                
+                const nodes = new vis.DataSet(data.nodes.map(n => ({ id: String(n.id), label: String(n.label || ''), group: n.group })));
+                const edges = new vis.DataSet(data.edges.map(e => ({ from: String(e.from), to: String(e.to), label: String(e.label || ''), arrows: 'to' })));
+                
+                const options = {
+                    nodes: { shape: 'dot', size: 16, font: { size: 14, color: document.documentElement.getAttribute('data-theme')==='dark'?'#fff':'#333' } },
+                    edges: { font: { size: 10, align: 'middle' }, color: { inherit: 'both' } },
+                    physics: { barnesHut: { gravitationalConstant: -2000, centralGravity: 0.3, springLength: 95 } }
+                };
+                new vis.Network(container, { nodes, edges }, options);
+            } catch(e) {
+                console.error("Graph Error:", e);
+                container.innerHTML = `<div style="display:flex; height:100%; align-items:center; justify-content:center; color:#ff5555; text-align:center;">오류가 발생했습니다.<br><small>${e.message}</small></div>`;
+            }
+        }
+        function closeGraph() { document.getElementById('graph-modal').style.display = 'none'; }
+
+        // ── Upload ────────────────────────────────────────────────────────────
+        const uploadZone = document.getElementById('upload-zone');
+        const fileInput = document.getElementById('file-input');
+        uploadZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => uploadFiles(Array.from(e.target.files)));
+
+        async function uploadFiles(files) {
+            if (!files.length) return;
+            const validFiles = files.filter(f => f.name.toLowerCase().endsWith('.pdf') || f.name.toLowerCase().endsWith('.docx'));
+            if(validFiles.length === 0) return alert('PDF 또는 DOCX 파일만 업로드할 수 있습니다.');
+
+            document.getElementById('upload-progress').style.display = 'block';
+            for (let i = 0; i < validFiles.length; i++) {
+                const form = new FormData();
+                form.append('file', validFiles[i]);
+                try { await fetch(`${API}/upload`, { method: 'POST', body: form }); } catch(e) {}
+            }
+            await loadDocuments();
+            document.getElementById('upload-progress').style.display = 'none';
+        }
+
+        async function deleteDoc(id) {
+            if (!confirm('이 문서를 삭제할까요?')) return;
+            await fetch(`${API}/documents/${id}`, { method: 'DELETE' });
+            selectedDocIds.delete(id);
+            await loadDocuments();
+        }
+
+        document.getElementById('clear-btn').addEventListener('click', async () => {
+            if (!confirm('모든 문서를 삭제할까요?')) return;
+            for (const d of docs) await fetch(`${API}/documents/${d.id}`, { method: 'DELETE' });
+            selectedDocIds.clear();
+            chatHistory = []; saveChatHistory(); document.getElementById('messages').innerHTML = '';
+            closeViewer(); await loadDocuments();
+        });
+
+        // ── Voice ─────────────────────────────────────────────────────────────
+        const micBtn = document.getElementById('mic-btn');
+        if ('webkitSpeechRecognition' in window) {
+            const recognition = new webkitSpeechRecognition();
+            recognition.lang = 'ko-KR';
+            recognition.onstart = () => micBtn.classList.add('listening');
+            recognition.onresult = (e) => { input.value = e.results[0][0].transcript; sendMessage(); };
+            recognition.onend = () => micBtn.classList.remove('listening');
+            micBtn.addEventListener('click', () => micBtn.classList.contains('listening') ? recognition.stop() : recognition.start());
+        }
+
+        // ── Viewer ────────────────────────────────────────────────────────────
+        let currentViewerDocId = null;
+        function openViewer(page, docId=null) {
+            if (!docId) docId = currentViewerDocId || (Array.from(selectedDocIds)[0]); 
+            if (!docId) return;
+            const doc = docs.find(d => d.id === docId);
+            if (!doc) return;
+            currentViewerDocId = docId;
+            document.getElementById('pdf-pane').style.display = 'flex';
+            document.getElementById('viewer-title').textContent = doc.filename;
+            
+            if (doc.filename.toLowerCase().endsWith('.docx')) {
+                document.getElementById('pdf-iframe').src = `${API}/uploads/${doc.id}.txt`;
+            } else {
+                document.getElementById('pdf-iframe').src = `${API}/uploads/${doc.id}.pdf#page=${page}`;
+            }
+        }
+        function closeViewer() { document.getElementById('pdf-pane').style.display = 'none'; }
+
+        // ── Local Mode Toggle ────────────────────────────────────────────────
+        const localToggle = document.getElementById('local-mode-toggle');
+        const modeLabel = document.getElementById('mode-label');
+        localToggle.addEventListener('change', (e) => {
+            if(e.target.checked) {
+                modeLabel.textContent = '💻 로컬 모드';
+                document.documentElement.classList.add('local-active');
+            } else {
+                modeLabel.textContent = '☁️ 클라우드';
+                document.documentElement.classList.remove('local-active');
+            }
+        });
+
+        // ── Chat ──────────────────────────────────────────────────────────────
+        const input = document.getElementById('question-input');
+        const sendBtn = document.getElementById('send-btn');
+        const messages = document.getElementById('messages');
+
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+        sendBtn.addEventListener('click', sendMessage);
+
+        function setQuestion(q) { input.value = q; sendMessage(); }
+        function parseCitations(text) { return text.replace(/\[(\d+)\]/g, '<button class="cite-badge" onclick="openViewer($1)">P.$1</button>'); }
+
+        async function sendMessage() {
+            const q = input.value.trim();
+            if (!q) return;
+            const welcome = document.querySelector('.welcome-msg'); if (welcome) welcome.remove();
+
+            appendMessage('user', q);
+            chatHistory.push({ role: 'user', content: q });
+            saveChatHistory();
+            input.value = ''; sendBtn.disabled = true;
+
+            const thinkingId = appendMessage('ai', '<span class="thinking">답변 생성 중<span class="dots">...</span></span>');
+            let fullAnswer = "";
+
+            try {
+                const isLocal = document.getElementById('local-mode-toggle').checked;
+                const res = await fetch(`${API}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: q, doc_ids: Array.from(selectedDocIds), is_local: isLocal })
+                });
+
+                if (!res.ok) throw new Error("서버 응답 오류");
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let isFirst = true;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    fullAnswer += decoder.decode(value, { stream: true });
+                    if (isFirst) { updateMessage(thinkingId, parseCitations(fullAnswer)); isFirst = false; } 
+                    else { updateMessage(thinkingId, parseCitations(fullAnswer)); }
+                }
+                chatHistory.push({ role: 'ai', content: fullAnswer });
+                saveChatHistory();
+            } catch(e) {
+                updateMessage(thinkingId, '❌ 오류 발생');
+            }
+            sendBtn.disabled = false;
+        }
+
+        let msgId = 0;
+        function appendMessage(role, content) {
+            const id = 'msg-' + (++msgId);
+            const div = document.createElement('div');
+            div.className = `message ${role}`; div.id = id;
+            div.innerHTML = `<div class="msg-avatar">${role === 'user' ? '👤' : '◈'}</div><div class="msg-content">${role === 'ai' ? parseCitations(content) : content}</div>`;
+            messages.appendChild(div); messages.scrollTop = messages.scrollHeight;
+            return id;
+        }
+        function updateMessage(id, content) {
+            const el = document.getElementById(id);
+            if (el) el.querySelector('.msg-content').innerHTML = content.replace(/\n/g, '<br>');
+            messages.scrollTop = messages.scrollHeight;
+        }
+        function renderChatHistory() {
+            if (chatHistory.length > 0) {
+                const w = document.querySelector('.welcome-msg'); if (w) w.remove();
+                chatHistory.forEach(msg => appendMessage(msg.role, msg.content));
+            }
+        }
+        loadDocuments();
+        renderChatHistory();
+    </script>
+</body>
+</html>

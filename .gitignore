@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+env/
+.env
+
+# Uploads and Database
+backend/uploads/
+backend/vector_store.json
+
+# System
+.DS_Store
+Thumbs.db
