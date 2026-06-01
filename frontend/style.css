@@ -172,8 +172,9 @@ body {
 }
 .doc-item {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
     padding: 10px 8px;
     border-radius: 8px;
     cursor: pointer;
