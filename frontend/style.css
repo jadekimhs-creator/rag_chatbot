@@ -606,4 +606,36 @@ html.local-active .send-btn { background: #10b981; }
 html.local-active .message.user .msg-content { background: #10b981; }
 html.local-active .message.user .msg-avatar { background: #10b981; }
 
-
+/* ── Mobile Responsiveness ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .app-layout {
+        flex-direction: column;
+    }
+    .sidebar {
+        width: 100%;
+        max-height: 40vh;
+        border-right: none;
+        border-bottom: 1px solid var(--sidebar-border);
+    }
+    .workspace {
+        flex-direction: column;
+    }
+    .pdf-pane {
+        width: 100%;
+        min-height: 35vh;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+    .chat-header {
+        padding: 12px;
+    }
+    .messages {
+        padding: 16px;
+    }
+    .message {
+        max-width: 100%;
+    }
+    .input-area {
+        padding: 12px;
+    }
+}
